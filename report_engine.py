@@ -172,16 +172,23 @@ def _scrub(t):
         t = re.sub(re.escape(b), "", t, flags=re.IGNORECASE)
     return re.sub(r"\s{2,}", " ", t).strip()
 
-def gemini_json(prompt, keys, retries=2, temp=0.7):
+def gemini_json(prompt, keys, retries=3, temp=0.7):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     h = {"x-goog-api-key": _gemini_key(), "Content-Type": "application/json"}
     last = ""
+    # gentle pacing between calls keeps us under the free-tier per-minute limit
+    time.sleep(4)
     for i in range(retries + 1):
         full = prompt if i == 0 else prompt + f"\n\nPrevious reply failed: {last}. Return ONLY JSON with keys {keys}."
         body = {"contents": [{"parts": [{"text": full}]}],
                 "generationConfig": {"temperature": temp, "responseMimeType": "application/json"}}
         try:
             resp = requests.post(url, headers=h, json=body, timeout=90)
+            # rate limited: wait longer and retry, don't fail
+            if resp.status_code == 429:
+                last = "rate limited (429)"
+                time.sleep(20 * (i + 1))   # 20s, 40s, 60s backoff
+                continue
             resp.raise_for_status()
             raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
             raw = re.sub(r"^```json|^```|```$", "", raw.strip(), flags=re.MULTILINE).strip()
@@ -194,7 +201,7 @@ def gemini_json(prompt, keys, retries=2, temp=0.7):
             last = f"bad JSON ({e})"
         except Exception as e:
             last = f"error ({e})"
-        time.sleep(1)
+        time.sleep(2)
     raise RuntimeError(f"Gemini call failed: {last}")
 
 # ==========================================================================
@@ -255,7 +262,7 @@ Return ONLY JSON: {{"characterization":"...","biggest_mistake":"...","findings":
 
     if progress_cb: progress_cb(3, 4, "Extracting what makes top videos work")
     performers = []
-    for _, r in transcribed.head(8).iterrows():
+    for _, r in transcribed.head(4).iterrows():
         if not r["transcript"] or len(r["transcript"]) < 40:
             continue
         try:
