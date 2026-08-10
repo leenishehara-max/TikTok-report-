@@ -56,8 +56,13 @@ def scrape_account(username, limit=100):
         "shouldDownloadVideos": False, "shouldDownloadCovers": False,
         "shouldDownloadSubtitles": False,
     })
+    # apify-client versions differ: .call() may return a dict or a Run object.
+    if isinstance(run, dict):
+        dataset_id = run.get("defaultDatasetId") or run.get("default_dataset_id")
+    else:
+        dataset_id = getattr(run, "default_dataset_id", None) or getattr(run, "defaultDatasetId", None)
     rows = []
-    for it in client.dataset(run["defaultDatasetId"]).iterate_items():
+    for it in client.dataset(dataset_id).iterate_items():
         vm = it.get("videoMeta") or {}
         ts = it.get("createTimeISO")
         created = None
